@@ -1,0 +1,15 @@
+crewai
+crewai-tools
+python-dotenv
+requests
+geopy
+fastapi
+uvicorn
+firebase-admin
+langchain-google-genai
+openai
+langchain_google_genai
+google-adk
+beautifulsoup4
+langchain-community
+duckduckgo-search
