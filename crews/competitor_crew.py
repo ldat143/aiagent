@@ -1,16 +1,18 @@
 import os
+import json
+import re
 from dotenv import load_dotenv
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai_tools import SerperDevTool
-#from tools.custom_tools import SerperDevTool
-
 from tools.custom_tools import DistanceCalculatorTool, CompetitorVerifierTool
 
 load_dotenv()
 
 # Configurar el modelo LLM
+    #model='gemini/gemini-2.0-flash-lite',
+
 llm = LLM(
-    model='gemini/gemini-2.0-flash-lite',
+    model='gemini/gemini-2.0-flash-lite',   
     api_key=os.environ["GEMINI_API_KEY"],
     temperature=0,
     verbose=True,
@@ -63,21 +65,37 @@ dealership_info_task = Task(
 )
 
 competitor_research_task = Task(
-    description="Search competitors selling the same OEM within 100 miles of {dealership}.",
-    expected_output="List of competitors with name, website, address, city/state and distance.",
+    description=(
+        "Search for car dealerships that sell the same OEM as {dealership}, located within 100 miles. "
+        "Return exactly 5 competitors in JSON format with the following fields for each: "
+        "name, website, distance (in miles), city, state, latitude, longitude."
+    ),
+    expected_output=(
+        'List of 5 competitors as JSON objects: '
+        '[{"name": "...", "website": "...", "distance": "...", "city": "...", '
+        '"state": "...", "latitude": "...", "longitude": "..."}, ...]'
+    ),
     agent=competitor_researcher,
     tools=[serper, distance_tool]
 )
 
 data_organization_task = Task(
     description="Organize competitor data into a structured table.",
-    expected_output="Markdown table: Name | Website | Distance | City | State.",
+    expected_output=(
+    'Return the same 5 competitors as JSON list: '
+    '[{"name": "...", "website": "...", "distance": "...", "city": "...", '
+    '"state": "...", "latitude": "...", "longitude": "..."}, ...]'
+),
     agent=data_organizer
 )
 
 supervision_task = Task(
     description="Verify all competitor data, check OEM, website, and existence.",
-    expected_output="Final summary with dealership info and validated competitor table.",
+    expected_output=(
+    'Validate and return the final list of 5 competitors in this exact JSON format: '
+    '[{"name": "...", "website": "...", "distance": "...", "city": "...", '
+    '"state": "...", "latitude": "...", "longitude": "..."}, ...]'
+),
     agent=results_supervisor,
     tools=[verifier_tool]
 )
@@ -93,4 +111,19 @@ competitor_crew = Crew(
 
 # Función para ejecutar desde main.py
 def run_competitor_crew(**kwargs):
-    return competitor_crew.kickoff(inputs=kwargs)
+    raw_output = competitor_crew.kickoff(inputs=kwargs)
+
+    try:
+        # Convertir CrewOutput a string antes de procesar
+        json_candidate = str(raw_output).strip()
+        if "Final Output:" in json_candidate:
+            json_candidate = json_candidate.split("Final Output:")[-1].strip()
+
+        match = re.search(r"\[.*\]", json_candidate, re.DOTALL)
+        if not match:
+            return {"error": "No valid JSON list found in output."}
+
+        cleaned_json = match.group()
+        return json.loads(cleaned_json)
+    except Exception as e:
+        return {"error": f"Failed to parse JSON: {str(e)}"}
