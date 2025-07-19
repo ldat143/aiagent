@@ -1,14 +1,18 @@
 import os
+import json
+import re
+
 from dotenv import load_dotenv
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai_tools import SerperDevTool
-#from tools.custom_tools import SerperDevTool
 
 from tools.custom_tools import DistanceCalculatorTool, PopulationDataTool
 
 load_dotenv()
 
 # Configurar el modelo LLM
+    #model='gemini/gemini-2.0-flash-lite',
+
 llm = LLM(
     model='gemini/gemini-2.0-flash-lite',
     api_key=os.environ["GEMINI_API_KEY"],
@@ -71,20 +75,30 @@ opportunities_research_task = Task(
         "Use DistanceCalculatorTool for distances in miles. "
         "Return a list of valid cities with their City/Town Name, Distance from dealer, and State."
     ),
-    expected_output="A list of dictionaries: Nearby City/Town Name, Distance From Dealer, State.",
+    expected_output=(
+    'Return a JSON list of up to 5 cities like this:\n'
+    '[{"distance": "string", "city": "string", "state": "string", '
+    '"latitude": "float", "longitude": "float"}]'
+),
     agent=opportunities_researcher,
     tools=[serper, distance_tool, population_tool]
 )
 
 data_organization_task = Task(
     description="Take the list of nearby cities and organize the data into a markdown table.",
-    expected_output="Markdown table: City | Distance | State.",
+    expected_output=(
+    'Format and return the same 5 cities as JSON: '
+    '[{"distance": "...", "city": "...", "state": "...", "latitude": "...", "longitude": "..."}, ...]'
+),
     agent=data_organizer
 )
 
 supervision_task = Task(
     description="Review the dealership info and nearby city suggestions, and present the results clearly.",
-    expected_output="Final structured summary with dealership and opportunity info.",
+    expected_output=(
+    'Final validated list of 5 cities in the following JSON format: '
+    '[{"distance": "...", "city": "...", "state": "...", "latitude": "...", "longitude": "..."}, ...]'
+),
     agent=results_supervisor
 )
 
@@ -97,5 +111,23 @@ opportunity_crew = Crew(
 )
 
 # Función para ejecutar desde main.py
+
+
+
 def run_opportunity_crew(**kwargs):
-    return opportunity_crew.kickoff(inputs=kwargs)
+    raw_output = opportunity_crew.kickoff(inputs=kwargs)
+
+    try:
+        # Convertir CrewOutput a string antes de procesar
+        json_candidate = str(raw_output).strip()
+        if "Final Output:" in json_candidate:
+            json_candidate = json_candidate.split("Final Output:")[-1].strip()
+
+        match = re.search(r"\[.*\]", json_candidate, re.DOTALL)
+        if not match:
+            return {"error": "No valid JSON list found in output."}
+
+        cleaned_json = match.group()
+        return json.loads(cleaned_json)
+    except Exception as e:
+        return {"error": f"Failed to parse JSON: {str(e)}"}
